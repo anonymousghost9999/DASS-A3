@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lock
@@ -33,6 +35,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
@@ -64,8 +67,11 @@ import androidx.compose.ui.unit.sp
 import com.example.miniiiit.data.models.AttendanceStatus
 import com.example.miniiiit.data.models.User
 import com.example.miniiiit.data.models.UserRole
+import com.example.miniiiit.data.repository.CourseAssignment
 import com.example.miniiiit.data.repository.InMemoryAttendanceRepository
 import com.example.miniiiit.data.repository.InMemoryAuthDataSource
+import com.example.miniiiit.data.repository.InMemoryTimetableRepository
+import com.example.miniiiit.data.repository.TimetableEntryView
 import com.example.miniiiit.ui.theme.MiniIiitTheme
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -85,6 +91,7 @@ enum class AppScreen {
     Login,
     Dashboard,
     Attendance,
+    TimeTable,
     DashboardStub,
 }
 
@@ -129,6 +136,7 @@ class MainActivity : ComponentActivity() {
 fun MiniImsApp(modifier: Modifier = Modifier) {
     val authDataSource = remember { InMemoryAuthDataSource() }
     val attendanceRepository = remember { InMemoryAttendanceRepository(authDataSource) }
+    val timetableRepository = remember { InMemoryTimetableRepository(authDataSource) }
     var currentUser by remember { mutableStateOf<User?>(null) }
     var currentScreen by remember { mutableStateOf(AppScreen.Login) }
     var selectedFeature by remember { mutableStateOf("") }
@@ -149,6 +157,8 @@ fun MiniImsApp(modifier: Modifier = Modifier) {
                 onOpenFeature = {
                     if (it == "Attendance") {
                         currentScreen = AppScreen.Attendance
+                    } else if (it == "Time Table") {
+                        currentScreen = AppScreen.TimeTable
                     } else {
                         selectedFeature = it
                         currentScreen = AppScreen.DashboardStub
@@ -165,6 +175,18 @@ fun MiniImsApp(modifier: Modifier = Modifier) {
                 modifier = modifier,
                 user = user,
                 attendanceRepository = attendanceRepository,
+                onBack = { currentScreen = AppScreen.Dashboard },
+                onLogout = {
+                    currentUser = null
+                    currentScreen = AppScreen.Login
+                },
+            )
+        }
+        AppScreen.TimeTable -> currentUser?.let { user ->
+            TimeTableModuleScreen(
+                modifier = modifier,
+                user = user,
+                timetableRepository = timetableRepository,
                 onBack = { currentScreen = AppScreen.Dashboard },
                 onLogout = {
                     currentUser = null
@@ -292,7 +314,7 @@ fun ModuleDashboardScreen(
     )
 
     val moduleFeatures = listOf(
-        DashboardFeatureItem("Time Table", "Stub module", Icons.Default.CalendarMonth),
+        DashboardFeatureItem("Time Table", "Drag-drop scheduling with collision checks", Icons.Default.CalendarMonth),
         DashboardFeatureItem("Messaging", "Stub module", Icons.Default.Article),
         DashboardFeatureItem("Attendance", "Stub module", Icons.Default.Assignment),
         DashboardFeatureItem("Student Admission", "Stub module", Icons.Default.Person),
@@ -1446,6 +1468,466 @@ fun LegendDot(color: Color, label: String) {
         Spacer(modifier = Modifier.width(4.dp))
         Text(label, color = AppTextMuted, fontSize = 11.sp)
     }
+}
+
+@Composable
+fun TimeTableModuleScreen(
+    modifier: Modifier = Modifier,
+    user: User,
+    timetableRepository: InMemoryTimetableRepository,
+    onBack: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    val isStudent = user.role == UserRole.STUDENT
+    val canManage = timetableRepository.canManageOfficialTimetable(user)
+
+    val batches = remember { timetableRepository.getBatches() }
+    val slots = remember { timetableRepository.getSlots() }
+    val courses = remember { timetableRepository.getCourseAssignments() }
+    val assignableCourses = remember(courses, user.role, user.username) {
+        when (user.role) {
+            UserRole.FACULTY -> courses.filter { it.facultyUsername == user.username }
+            else -> courses
+        }
+    }
+    val fixedStudentBatch = remember(user.username) { timetableRepository.getStudentBatch(user.username) }
+
+    var selectedBatch by remember {
+        mutableStateOf(if (isStudent) fixedStudentBatch else batches.firstOrNull().orEmpty())
+    }
+    var selectedCourseCode by remember { mutableStateOf(assignableCourses.firstOrNull()?.code.orEmpty()) }
+    var room by remember { mutableStateOf("R-101") }
+    var selectedMoveEntryId by remember { mutableStateOf<Int?>(null) }
+    var statusMessage by remember { mutableStateOf("Drag-and-drop flow: pick class, then drop on a slot.") }
+    var noteSlotId by remember { mutableStateOf(slots.firstOrNull()?.id ?: 1) }
+    var noteText by remember { mutableStateOf("") }
+    var refreshTick by remember { mutableStateOf(0) }
+
+    if (selectedCourseCode.isBlank() && assignableCourses.isNotEmpty()) {
+        selectedCourseCode = assignableCourses.first().code
+    }
+
+    if (selectedCourseCode.isNotBlank() && assignableCourses.none { it.code == selectedCourseCode }) {
+        selectedCourseCode = assignableCourses.firstOrNull()?.code.orEmpty()
+    }
+
+    val effectiveBatch = if (isStudent) fixedStudentBatch else selectedBatch
+    val visibleEntries = remember(effectiveBatch, refreshTick, user.username, user.role) {
+        timetableRepository.getVisibleEntriesForUser(user, effectiveBatch)
+    }
+    val entriesBySlot = remember(visibleEntries) { visibleEntries.associateBy { it.slotId } }
+    val selectedCourse = assignableCourses.firstOrNull { it.code == selectedCourseCode }
+    val studentNotes = remember(user.username, effectiveBatch, refreshTick) {
+        timetableRepository.getStudentNotes(user.username, effectiveBatch)
+    }
+    val studentNoteBySlot = remember(studentNotes) { studentNotes.associateBy { it.slotId } }
+
+    LaunchedEffect(noteSlotId, refreshTick) {
+        noteText = studentNoteBySlot[noteSlotId]?.note.orEmpty()
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(AppBg)
+            .padding(14.dp),
+    ) {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TextButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = null, tint = AppPrimary)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Back", color = AppPrimary)
+                }
+                Text("Time Table", color = AppTextDark, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                TextButton(onClick = onLogout) {
+                    Icon(Icons.Default.Logout, contentDescription = null, tint = AppPrimary)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Logout", color = AppPrimary)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        if (canManage) "Scheduler Workspace" else "Weekly Schedule",
+                        color = AppTextDark,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        if (canManage) {
+                            "Admin manages all classes. Faculty can assign, move, replace, and delete only their own classes."
+                        } else {
+                            "Student view is read-only for official schedule."
+                        },
+                        color = AppTextMuted,
+                        fontSize = 12.sp,
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text("Batch", color = AppTextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (isStudent) {
+                        AttendanceInfoPill(text = effectiveBatch)
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            batches.forEach { batch ->
+                                SelectionPill(
+                                    text = batch,
+                                    selected = selectedBatch == batch,
+                                    onClick = { selectedBatch = batch },
+                                )
+                            }
+                        }
+                    }
+
+                    if (canManage) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text("Drag Source (Pick Class)", color = AppTextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        if (assignableCourses.isEmpty()) {
+                            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft)) {
+                                Text(
+                                    text = "No assignable courses available for this faculty account.",
+                                    modifier = Modifier.padding(10.dp),
+                                    color = AppTextMuted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        } else {
+                            assignableCourses.forEach { course ->
+                                TimetableCourseDragCard(
+                                    course = course,
+                                    selected = selectedCourseCode == course.code,
+                                    onSelect = {
+                                        selectedCourseCode = course.code
+                                        selectedMoveEntryId = null
+                                        statusMessage = "Picked ${course.code}. Drop into a free slot."
+                                    },
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(
+                            value = room,
+                            onValueChange = { room = it },
+                            label = { Text("Room") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft)) {
+                        Row(
+                            modifier = Modifier.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Default.DragIndicator, contentDescription = null, tint = AppPrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(statusMessage, color = AppPrimaryDark, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            slots.forEach { slot ->
+                val existing = entriesBySlot[slot.id]
+                val preview = previewValidationForSlot(
+                    canManage = canManage,
+                    selectedMoveEntryId = selectedMoveEntryId,
+                    existingEntries = visibleEntries,
+                    selectedCourse = selectedCourse,
+                    selectedBatch = effectiveBatch,
+                    room = room,
+                    slotId = slot.id,
+                    timetableRepository = timetableRepository,
+                )
+
+                ElevatedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "${slot.dayLabel} ${slot.startTime}-${slot.endTime}",
+                                color = AppTextDark,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            AttendanceInfoPill(text = "Slot ${slot.id}")
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (existing == null) {
+                            Text("No class assigned", color = AppTextMuted, fontSize = 12.sp)
+                        } else {
+                            TimetableEntrySummary(entry = existing)
+                            if (canManage) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    SelectionPill(
+                                        text = if (selectedMoveEntryId == existing.id) "Move selected" else "Move",
+                                        selected = selectedMoveEntryId == existing.id,
+                                        onClick = {
+                                            selectedMoveEntryId = existing.id
+                                            statusMessage = "Picked ${existing.courseCode} for move. Drop in target slot."
+                                        },
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            val result = timetableRepository.deleteEntry(user, existing.id)
+                                            statusMessage = result.message
+                                            if (result.isAllowed) {
+                                                if (selectedMoveEntryId == existing.id) {
+                                                    selectedMoveEntryId = null
+                                                }
+                                                refreshTick += 1
+                                            }
+                                        },
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, tint = AppError)
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("Delete", color = AppError)
+                                    }
+                                }
+                            }
+                        }
+
+                        if (canManage) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = if (preview.isAllowed) "Drop target ready" else preview.message,
+                                    color = if (preview.isAllowed) Color(0xFF047857) else AppError,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Button(
+                                    onClick = {
+                                        val moveEntryId = selectedMoveEntryId
+                                        if (moveEntryId != null) {
+                                            val result = timetableRepository.moveEntry(
+                                                user = user,
+                                                entryId = moveEntryId,
+                                                targetSlotId = slot.id,
+                                            )
+                                            statusMessage = result.message
+                                            if (result.isAllowed) {
+                                                selectedMoveEntryId = null
+                                                refreshTick += 1
+                                            }
+                                        } else {
+                                            val selected = selectedCourse ?: return@Button
+                                            val result = timetableRepository.createOrReplaceEntry(
+                                                user = user,
+                                                draft = InMemoryTimetableRepository.TimetableDraft(
+                                                    slotId = slot.id,
+                                                    batch = effectiveBatch,
+                                                    courseCode = selected.code,
+                                                    facultyUsername = selected.facultyUsername,
+                                                    room = room,
+                                                ),
+                                            )
+                                            statusMessage = result.message
+                                            if (result.isAllowed) {
+                                                refreshTick += 1
+                                            }
+                                        }
+                                    },
+                                    enabled = preview.isAllowed,
+                                ) {
+                                    Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(if (selectedMoveEntryId != null) "Drop Move" else "Drop Class")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (isStudent) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("Personal Slot Notes", color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("Add reminders without modifying official timetable.", color = AppTextMuted, fontSize = 12.sp)
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            slots.take(5).forEach { slot ->
+                                SelectionPill(
+                                    text = "S${slot.id}",
+                                    selected = noteSlotId == slot.id,
+                                    onClick = { noteSlotId = slot.id },
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedTextField(
+                            value = noteText,
+                            onValueChange = { noteText = it },
+                            label = { Text("Note for slot $noteSlotId") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = {
+                                val result = timetableRepository.saveStudentNote(
+                                    user = user,
+                                    slotId = noteSlotId,
+                                    noteText = noteText,
+                                )
+                                statusMessage = result.message
+                                if (result.isAllowed) {
+                                    refreshTick += 1
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("Save Personal Note")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimetableCourseDragCard(
+    course: CourseAssignment,
+    selected: Boolean,
+    onSelect: () -> Unit,
+) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onSelect),
+        colors = CardDefaults.elevatedCardColors(
+            containerColor = if (selected) AppSurfaceSoft else AppSurface,
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("${course.code} - ${course.name}", color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                Text("Faculty: ${course.facultyUsername}", color = AppTextMuted, fontSize = 12.sp)
+            }
+            AttendanceInfoPill(text = if (selected) "Dragging" else "Pick")
+        }
+    }
+}
+
+@Composable
+private fun TimetableEntrySummary(entry: TimetableEntryView) {
+    Column {
+        Text("${entry.courseCode} - ${entry.courseName}", color = AppTextDark, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text("Batch: ${entry.batch}", color = AppTextMuted, fontSize = 12.sp)
+        Text("Faculty: ${entry.facultyName}", color = AppTextMuted, fontSize = 12.sp)
+        Text("Room: ${entry.room}", color = AppTextMuted, fontSize = 12.sp)
+    }
+}
+
+private fun previewValidationForSlot(
+    canManage: Boolean,
+    selectedMoveEntryId: Int?,
+    existingEntries: List<TimetableEntryView>,
+    selectedCourse: CourseAssignment?,
+    selectedBatch: String,
+    room: String,
+    slotId: Int,
+    timetableRepository: InMemoryTimetableRepository,
+) = when {
+    !canManage -> com.example.miniiiit.data.repository.TimetableValidationResult(
+        isAllowed = false,
+        message = "Read-only role.",
+    )
+    selectedMoveEntryId != null -> {
+        val source = existingEntries.firstOrNull { it.id == selectedMoveEntryId }
+        if (source == null) {
+            com.example.miniiiit.data.repository.TimetableValidationResult(false, "Select a valid class to move.")
+        } else {
+            timetableRepository.validateDraft(
+                draft = InMemoryTimetableRepository.TimetableDraft(
+                    slotId = slotId,
+                    batch = source.batch,
+                    courseCode = source.courseCode,
+                    facultyUsername = source.facultyUsername,
+                    room = source.room,
+                ),
+                ignoreEntryId = source.id,
+            )
+        }
+    }
+    selectedCourse == null -> com.example.miniiiit.data.repository.TimetableValidationResult(
+        false,
+        "Pick a class to drag.",
+    )
+    else -> timetableRepository.validateDraft(
+        draft = InMemoryTimetableRepository.TimetableDraft(
+            slotId = slotId,
+            batch = selectedBatch,
+            courseCode = selectedCourse.code,
+            facultyUsername = selectedCourse.facultyUsername,
+            room = room,
+        ),
+    )
 }
 
 private fun parseDateToMillis(text: String): Long? {

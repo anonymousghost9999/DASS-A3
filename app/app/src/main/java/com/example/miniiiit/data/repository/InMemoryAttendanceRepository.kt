@@ -79,12 +79,12 @@ class InMemoryAttendanceRepository(
 
     fun getCoursesForContext(batch: String, username: String, role: UserRole): List<AttendanceCourse> {
         val mapped = when (role) {
-            UserRole.FACULTY -> authDataSource.getCoursesForFaculty(username)
-            UserRole.STUDENT -> authDataSource.getCoursesForStudent(username)
-            else -> {
+            UserRole.FACULTY, UserRole.ADMIN -> {
                 val studentUser = getStudentsForBatch(batch).firstOrNull()?.username
                 if (studentUser == null) emptyList() else authDataSource.getCoursesForStudent(studentUser)
             }
+            UserRole.STUDENT -> authDataSource.getCoursesForStudent(username)
+            else -> emptyList()
         }
 
         return mapped
@@ -170,19 +170,14 @@ class InMemoryAttendanceRepository(
 
     fun getAvailableCourseCodes(viewer: User): List<String> {
         val codes = when (viewer.role) {
-            UserRole.ADMIN -> {
+            UserRole.ADMIN, UserRole.FACULTY -> {
                 val users = authDataSource.getAllUsers()
                 val studentCodes = users
                     .filter { it.role == UserRole.STUDENT }
                     .flatMap { authDataSource.getCoursesForStudent(it.username) }
                     .map { it.code }
-                val facultyCodes = users
-                    .filter { it.role == UserRole.FACULTY }
-                    .flatMap { authDataSource.getCoursesForFaculty(it.username) }
-                    .map { it.code }
-                studentCodes + facultyCodes
+                studentCodes
             }
-            UserRole.FACULTY -> authDataSource.getCoursesForFaculty(viewer.username).map { it.code }
             UserRole.STUDENT -> authDataSource.getCoursesForStudent(viewer.username).map { it.code }
             else -> emptyList()
         }
@@ -215,15 +210,8 @@ class InMemoryAttendanceRepository(
 
     private fun isVisibleTo(record: AttendanceRecord, viewer: User): Boolean {
         return when (viewer.role) {
-            UserRole.ADMIN -> true
+            UserRole.ADMIN, UserRole.FACULTY -> true
             UserRole.STUDENT -> record.username == viewer.username
-            UserRole.FACULTY -> {
-                val facultyCourseCodes = authDataSource
-                    .getCoursesForFaculty(viewer.username)
-                    .map { it.code }
-                    .toSet()
-                record.courseCode in facultyCourseCodes
-            }
             else -> false
         }
     }

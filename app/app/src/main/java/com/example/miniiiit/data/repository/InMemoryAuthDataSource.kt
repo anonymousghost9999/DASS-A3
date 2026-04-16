@@ -61,5 +61,11 @@ class InMemoryAuthDataSource {
         return courseAssignments.filter { it.facultyUsername == username }
     }
 
+    fun getAllCourseAssignments(): List<CourseAssignment> = courseAssignments
+
+    fun getUserByUsername(username: String): User? {
+        return users.firstOrNull { it.username == username }
+    }
+
     fun getAllUsers(): List<User> = users
 }
