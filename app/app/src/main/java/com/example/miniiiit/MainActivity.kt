@@ -42,11 +42,15 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -57,9 +61,15 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.miniiiit.data.models.AttendanceStatus
 import com.example.miniiiit.data.models.User
+import com.example.miniiiit.data.models.UserRole
+import com.example.miniiiit.data.repository.InMemoryAttendanceRepository
 import com.example.miniiiit.data.repository.InMemoryAuthDataSource
 import com.example.miniiiit.ui.theme.MiniIiitTheme
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 private val AppBg = Color(0xFFF8FAFC)
 private val AppSurface = Color(0xFFFFFFFF)
@@ -74,6 +84,7 @@ private val AppError = Color(0xFFDC2626)
 enum class AppScreen {
     Login,
     Dashboard,
+    Attendance,
     DashboardStub,
 }
 
@@ -87,6 +98,17 @@ enum class DashboardTab {
     Dashboard,
     Modules,
     Settings,
+}
+
+enum class AttendanceTab {
+    Mark,
+    Reports,
+}
+
+enum class AttendanceReportType {
+    Daily,
+    Monthly,
+    Subject,
 }
 
 class MainActivity : ComponentActivity() {
@@ -106,6 +128,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MiniImsApp(modifier: Modifier = Modifier) {
     val authDataSource = remember { InMemoryAuthDataSource() }
+    val attendanceRepository = remember { InMemoryAttendanceRepository(authDataSource) }
     var currentUser by remember { mutableStateOf<User?>(null) }
     var currentScreen by remember { mutableStateOf(AppScreen.Login) }
     var selectedFeature by remember { mutableStateOf("") }
@@ -124,9 +147,25 @@ fun MiniImsApp(modifier: Modifier = Modifier) {
                 modifier = modifier,
                 user = user,
                 onOpenFeature = {
-                    selectedFeature = it
-                    currentScreen = AppScreen.DashboardStub
+                    if (it == "Attendance") {
+                        currentScreen = AppScreen.Attendance
+                    } else {
+                        selectedFeature = it
+                        currentScreen = AppScreen.DashboardStub
+                    }
                 },
+                onLogout = {
+                    currentUser = null
+                    currentScreen = AppScreen.Login
+                },
+            )
+        }
+        AppScreen.Attendance -> currentUser?.let { user ->
+            AttendanceModuleScreen(
+                modifier = modifier,
+                user = user,
+                attendanceRepository = attendanceRepository,
+                onBack = { currentScreen = AppScreen.Dashboard },
                 onLogout = {
                     currentUser = null
                     currentScreen = AppScreen.Login
@@ -554,6 +593,879 @@ fun SettingsFormStub() {
     Button(onClick = { }, modifier = Modifier.fillMaxWidth()) {
         Text("Save")
     }
+}
+
+@Composable
+fun AttendanceModuleScreen(
+    modifier: Modifier = Modifier,
+    user: User,
+    attendanceRepository: InMemoryAttendanceRepository,
+    onBack: () -> Unit,
+    onLogout: () -> Unit,
+) {
+    val isStudent = user.role == UserRole.STUDENT
+    var selectedTab by remember { mutableStateOf(if (isStudent) AttendanceTab.Reports else AttendanceTab.Mark) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(AppBg)
+            .padding(14.dp),
+    ) {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TextButton(onClick = onBack) {
+                    Icon(Icons.Default.ArrowBack, contentDescription = null, tint = AppPrimary)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Back", color = AppPrimary)
+                }
+                Text("Attendance", color = AppTextDark, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                TextButton(onClick = onLogout) {
+                    Icon(Icons.Default.Logout, contentDescription = null, tint = AppPrimary)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Logout", color = AppPrimary)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (isStudent) {
+            TabRow(selectedTabIndex = 0) {
+                Tab(
+                    selected = true,
+                    onClick = { selectedTab = AttendanceTab.Reports },
+                    text = { Text("Reports") },
+                )
+            }
+        } else {
+            TabRow(selectedTabIndex = if (selectedTab == AttendanceTab.Mark) 0 else 1) {
+                Tab(
+                    selected = selectedTab == AttendanceTab.Mark,
+                    onClick = { selectedTab = AttendanceTab.Mark },
+                    text = { Text("Mark") },
+                )
+                Tab(
+                    selected = selectedTab == AttendanceTab.Reports,
+                    onClick = { selectedTab = AttendanceTab.Reports },
+                    text = { Text("Reports") },
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        when (selectedTab) {
+            AttendanceTab.Mark -> {
+                if (isStudent) {
+                    ElevatedCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+                    ) {
+                        Text(
+                            text = "Students cannot mark attendance. Please use Reports to view your attendance.",
+                            modifier = Modifier.padding(14.dp),
+                            color = AppTextMuted,
+                        )
+                    }
+                } else {
+                    AttendanceMarkScreen(
+                        user = user,
+                        attendanceRepository = attendanceRepository,
+                    )
+                }
+            }
+            AttendanceTab.Reports -> AttendanceReportsScreen(
+                user = user,
+                attendanceRepository = attendanceRepository,
+            )
+        }
+    }
+}
+
+@Composable
+fun AttendanceMarkScreen(
+    user: User,
+    attendanceRepository: InMemoryAttendanceRepository,
+) {
+    val batches = remember { attendanceRepository.getBatches() }
+    var selectedBatch by remember { mutableStateOf(batches.firstOrNull().orEmpty()) }
+    var selectedCourse by remember { mutableStateOf("") }
+    var dateText by remember { mutableStateOf(formatDate(System.currentTimeMillis())) }
+    var saveMessage by remember { mutableStateOf("") }
+
+    val students = remember(selectedBatch) { attendanceRepository.getStudentsForBatch(selectedBatch) }
+    val courses = remember(selectedBatch, user.username, user.role) {
+        attendanceRepository.getCoursesForContext(selectedBatch, user.username, user.role)
+    }
+
+    if (selectedCourse.isBlank() && courses.isNotEmpty()) {
+        selectedCourse = courses.first().code
+    }
+
+    val statusMap = remember(selectedBatch, selectedCourse, dateText) { mutableStateMapOf<String, AttendanceStatus>() }
+    val remarksMap = remember(selectedBatch, selectedCourse, dateText) { mutableStateMapOf<String, String>() }
+
+    val selectedDateMillis = parseDateToMillis(dateText)
+    val existingRecords = remember(selectedBatch, selectedCourse, dateText, user.username, user.role) {
+        if (selectedDateMillis == null || selectedCourse.isBlank() || selectedBatch.isBlank()) {
+            emptyList()
+        } else {
+            attendanceRepository.getAttendanceForContext(
+                viewer = user,
+                batch = selectedBatch,
+                courseCode = selectedCourse,
+                dateMillis = selectedDateMillis,
+            )
+        }
+    }
+
+    LaunchedEffect(students, selectedBatch, selectedCourse, dateText, existingRecords) {
+        statusMap.clear()
+        remarksMap.clear()
+
+        students.forEach { student ->
+            statusMap[student.username] = AttendanceStatus.PRESENT
+            remarksMap[student.username] = ""
+        }
+
+        existingRecords.forEach { record ->
+            statusMap[record.username] = record.status
+            remarksMap[record.username] = record.remarks
+        }
+    }
+
+    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("Mark Attendance", color = AppTextDark, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Edit the current class record and save changes in one step.", color = AppTextMuted, fontSize = 12.sp)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                AttendanceSectionLabel(text = "Batch")
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    batches.forEach { batch ->
+                        SelectionPill(
+                            text = batch,
+                            selected = selectedBatch == batch,
+                            onClick = { selectedBatch = batch },
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                AttendanceSectionLabel(text = "Course")
+                Spacer(modifier = Modifier.height(6.dp))
+                if (courses.isEmpty()) {
+                    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft)) {
+                        Text(
+                            "No courses available for this context.",
+                            modifier = Modifier.padding(12.dp),
+                            color = AppTextMuted,
+                            fontSize = 12.sp,
+                        )
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        courses.forEach { course ->
+                            ElevatedCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.elevatedCardColors(
+                                    containerColor = if (selectedCourse == course.code) AppSurfaceSoft else AppSurface,
+                                ),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(course.code, color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                                        Text(course.name, color = AppTextMuted, fontSize = 12.sp)
+                                    }
+                                    SelectionPill(
+                                        text = if (selectedCourse == course.code) "Selected" else "Select",
+                                        selected = selectedCourse == course.code,
+                                        onClick = { selectedCourse = course.code },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                AttendanceSectionLabel(text = "Date")
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = dateText,
+                    onValueChange = { dateText = it },
+                    label = { Text("Date (yyyy-MM-dd)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SelectionPill(text = "Today", selected = false, onClick = { dateText = formatDate(System.currentTimeMillis()) })
+                    SelectionPill(text = "Yesterday", selected = false, onClick = { dateText = formatDate(System.currentTimeMillis() - (24L * 60L * 60L * 1000L)) })
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (existingRecords.isNotEmpty()) {
+                    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFFEFF6FF))) {
+                        Text(
+                            "Editing existing attendance: ${existingRecords.size} records loaded",
+                            modifier = Modifier.padding(12.dp),
+                            color = AppPrimaryDark,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                } else {
+                    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft)) {
+                        Text(
+                            "No saved record found for this batch, course, and date. You are creating a new entry.",
+                            modifier = Modifier.padding(12.dp),
+                            color = AppTextMuted,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = "Students",
+            color = AppTextDark,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 16.sp,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        students.forEach { student ->
+            ElevatedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(student.fullName, color = AppTextDark, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text(student.username, color = AppTextMuted, fontSize = 12.sp)
+                        }
+                        AttendanceStatusBadge(statusMap[student.username] ?: AttendanceStatus.PRESENT)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        AttendanceStatusChip(
+                            label = "P",
+                            selected = statusMap[student.username] == AttendanceStatus.PRESENT,
+                            onClick = { statusMap[student.username] = AttendanceStatus.PRESENT },
+                        )
+                        AttendanceStatusChip(
+                            label = "A",
+                            selected = statusMap[student.username] == AttendanceStatus.ABSENT,
+                            onClick = { statusMap[student.username] = AttendanceStatus.ABSENT },
+                        )
+                        AttendanceStatusChip(
+                            label = "LA",
+                            selected = statusMap[student.username] == AttendanceStatus.LEAVE_APPLIED,
+                            onClick = { statusMap[student.username] = AttendanceStatus.LEAVE_APPLIED },
+                        )
+                        AttendanceStatusChip(
+                            label = "LP",
+                            selected = statusMap[student.username] == AttendanceStatus.LEAVE_APPROVED,
+                            onClick = { statusMap[student.username] = AttendanceStatus.LEAVE_APPROVED },
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedTextField(
+                        value = remarksMap[student.username].orEmpty(),
+                        onValueChange = { remarksMap[student.username] = it },
+                        label = { Text("Remark (optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Button(
+            onClick = {
+                val dateMillis = parseDateToMillis(dateText)
+                if (dateMillis == null || selectedCourse.isBlank() || selectedBatch.isBlank()) {
+                    saveMessage = "Please enter valid batch, course, and date."
+                } else {
+                    attendanceRepository.markAttendance(
+                        markedBy = user.username,
+                        batch = selectedBatch,
+                        courseCode = selectedCourse,
+                        dateMillis = dateMillis,
+                        marks = students.map {
+                            InMemoryAttendanceRepository.AttendanceMarkInput(
+                                username = it.username,
+                                status = statusMap[it.username] ?: AttendanceStatus.PRESENT,
+                                remarks = remarksMap[it.username].orEmpty(),
+                            )
+                        },
+                    )
+                    saveMessage = if (existingRecords.isNotEmpty()) {
+                        "Attendance updated and saved for ${students.size} students."
+                    } else {
+                        "Attendance saved for ${students.size} students."
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(if (existingRecords.isNotEmpty()) "Update and Save" else "Save Attendance")
+        }
+
+        if (saveMessage.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft)) {
+                Text(
+                    saveMessage,
+                    modifier = Modifier.padding(12.dp),
+                    color = AppPrimaryDark,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun AttendanceSectionLabel(text: String) {
+    Text(text, color = AppTextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+}
+
+@Composable
+fun SelectionPill(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = if (selected) AppPrimary else AppSurfaceSoft,
+            contentColor = if (selected) Color.White else AppPrimary,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Text(text, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+fun AttendanceStatusChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        modifier = Modifier.height(38.dp),
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = when (label) {
+                "P" -> if (selected) Color(0xFF059669) else Color(0xFFD1FAE5)
+                "A" -> if (selected) Color(0xFFDC2626) else Color(0xFFFEE2E2)
+                "LA" -> if (selected) Color(0xFFD97706) else Color(0xFFFEF3C7)
+                else -> if (selected) Color(0xFF4C1D95) else Color(0xFFEDE9FE)
+            },
+            contentColor = when (label) {
+                "P" -> if (selected) Color.White else Color(0xFF047857)
+                "A" -> if (selected) Color.White else Color(0xFFB91C1C)
+                "LA" -> if (selected) Color.White else Color(0xFF92400E)
+                else -> if (selected) Color.White else Color(0xFF5B21B6)
+            },
+        ),
+    ) {
+        Text(
+            text = label,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 13.sp,
+        )
+    }
+}
+
+@Composable
+fun AttendanceReportsScreen(
+    user: User,
+    attendanceRepository: InMemoryAttendanceRepository,
+) {
+    if (user.role == UserRole.STUDENT) {
+        StudentAttendanceReportScreen(user = user, attendanceRepository = attendanceRepository)
+        return
+    }
+
+    var reportType by remember { mutableStateOf(AttendanceReportType.Daily) }
+    var dateText by remember { mutableStateOf(formatDate(System.currentTimeMillis())) }
+    var monthText by remember { mutableStateOf(formatMonth(System.currentTimeMillis())) }
+    val availableCourseCodes = remember(user.username, user.role) {
+        attendanceRepository.getAvailableCourseCodes(user)
+    }
+    var courseCode by remember { mutableStateOf(availableCourseCodes.firstOrNull().orEmpty()) }
+
+    val reportRecords = remember(reportType, dateText, monthText, courseCode, user.username, user.role) {
+        when (reportType) {
+            AttendanceReportType.Daily -> {
+                parseDateToMillis(dateText)?.let {
+                    attendanceRepository.getDailyReport(user, it)
+                } ?: emptyList()
+            }
+            AttendanceReportType.Monthly -> attendanceRepository.getMonthlyReport(user, monthText)
+            AttendanceReportType.Subject -> attendanceRepository.getSubjectWiseReport(user, courseCode)
+        }
+    }
+
+    val presentCount = reportRecords.count { it.status == AttendanceStatus.PRESENT }
+    val absentCount = reportRecords.count { it.status == AttendanceStatus.ABSENT }
+    val leaveCount = reportRecords.count {
+        it.status == AttendanceStatus.LEAVE_APPLIED || it.status == AttendanceStatus.LEAVE_APPROVED
+    }
+
+    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("Attendance Reports", color = AppTextDark, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Filter and review attendance records", color = AppTextMuted, fontSize = 12.sp)
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ReportTypeChip(
+                        title = "Daily",
+                        selected = reportType == AttendanceReportType.Daily,
+                        onClick = { reportType = AttendanceReportType.Daily },
+                    )
+                    ReportTypeChip(
+                        title = "Monthly",
+                        selected = reportType == AttendanceReportType.Monthly,
+                        onClick = { reportType = AttendanceReportType.Monthly },
+                    )
+                    ReportTypeChip(
+                        title = "Subject",
+                        selected = reportType == AttendanceReportType.Subject,
+                        onClick = { reportType = AttendanceReportType.Subject },
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                when (reportType) {
+                    AttendanceReportType.Daily -> {
+                        OutlinedTextField(
+                            value = dateText,
+                            onValueChange = { dateText = it },
+                            label = { Text("Date (yyyy-MM-dd)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                    }
+                    AttendanceReportType.Monthly -> {
+                        OutlinedTextField(
+                            value = monthText,
+                            onValueChange = { monthText = it },
+                            label = { Text("Month (yyyy-MM)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                        )
+                    }
+                    AttendanceReportType.Subject -> {
+                        if (availableCourseCodes.isEmpty()) {
+                            Text("No courses available for this user.", color = AppTextMuted)
+                        } else {
+                            Text("Select Course", color = AppTextMuted)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            availableCourseCodes.forEach { code ->
+                                TextButton(
+                                    onClick = { courseCode = code },
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Text(
+                                        text = if (courseCode == code) "* $code" else code,
+                                        color = if (courseCode == code) AppPrimary else AppTextDark,
+                                        fontWeight = if (courseCode == code) FontWeight.SemiBold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("Summary", color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AttendanceMetricCard(modifier = Modifier.weight(1f), title = "Total", value = reportRecords.size.toString())
+                    AttendanceMetricCard(modifier = Modifier.weight(1f), title = "Present", value = presentCount.toString())
+                    AttendanceMetricCard(modifier = Modifier.weight(1f), title = "Absent", value = absentCount.toString())
+                    AttendanceMetricCard(modifier = Modifier.weight(1f), title = "Leave", value = leaveCount.toString())
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        if (reportRecords.isEmpty()) {
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("No records found", color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text("Try a different date, month, or course filter.", color = AppTextMuted, fontSize = 12.sp)
+                }
+            }
+        } else {
+            Text(
+                text = "Records",
+                color = AppTextDark,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 16.sp,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            reportRecords.forEach { record ->
+                ElevatedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = record.studentFullName,
+                                    color = AppTextDark,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontSize = 15.sp,
+                                )
+                                Text(
+                                    text = record.username,
+                                    color = AppTextMuted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                            AttendanceStatusBadge(record.status)
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AttendanceInfoPill("${record.courseCode}")
+                            AttendanceInfoPill(formatDate(record.dateMillis))
+                        }
+
+                        if (record.remarks.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "Remark",
+                                color = AppTextMuted,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = record.remarks,
+                                color = AppTextDark,
+                                fontSize = 13.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ReportTypeChip(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Button(
+        onClick = onClick,
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = if (selected) AppPrimary else AppSurfaceSoft,
+            contentColor = if (selected) Color.White else AppPrimary,
+        ),
+    ) {
+        Text(title, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+fun AttendanceMetricCard(
+    modifier: Modifier = Modifier,
+    title: String,
+    value: String,
+) {
+    ElevatedCard(
+        modifier = modifier,
+        colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft),
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Text(title, color = AppTextMuted, fontSize = 11.sp)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(value, color = AppTextDark, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+fun AttendanceInfoPill(text: String) {
+    ElevatedCard(
+        colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = AppPrimaryDark,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+fun AttendanceStatusBadge(status: AttendanceStatus) {
+    val background = when (status) {
+        AttendanceStatus.PRESENT -> Color(0xFFD1FAE5)
+        AttendanceStatus.ABSENT -> Color(0xFFFEE2E2)
+        AttendanceStatus.LEAVE_APPLIED -> Color(0xFFFEF3C7)
+        AttendanceStatus.LEAVE_APPROVED -> Color(0xFFEDE9FE)
+    }
+    val textColor = when (status) {
+        AttendanceStatus.PRESENT -> Color(0xFF047857)
+        AttendanceStatus.ABSENT -> Color(0xFFB91C1C)
+        AttendanceStatus.LEAVE_APPLIED -> Color(0xFF92400E)
+        AttendanceStatus.LEAVE_APPROVED -> Color(0xFF5B21B6)
+    }
+
+    ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = background)) {
+        Text(
+            text = status.name.replace('_', ' '),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = textColor,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+fun StudentAttendanceReportScreen(
+    user: User,
+    attendanceRepository: InMemoryAttendanceRepository,
+) {
+    var selectedCourseCode by remember { mutableStateOf<String?>(null) }
+    val summary = remember(user.username) { attendanceRepository.getStudentCourseSummary(user.username) }
+    val detailRecords = remember(user.username, selectedCourseCode) {
+        selectedCourseCode?.let { attendanceRepository.getStudentCourseRecords(user.username, it) } ?: emptyList()
+    }
+    val selectedCourseName = summary.firstOrNull { it.courseCode == selectedCourseCode }?.courseName.orEmpty()
+
+    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text("My Attendance", color = AppTextDark, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text("Tap a course for detailed attendance", color = AppTextMuted, fontSize = 12.sp)
+                Spacer(modifier = Modifier.height(10.dp))
+                AttendanceInfoPill(text = "${formatMonth(System.currentTimeMillis())} Semester")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        ElevatedCard(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text("Course Name", modifier = Modifier.weight(1.8f), color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                    Text("Total", modifier = Modifier.weight(0.6f), color = AppTextMuted, fontWeight = FontWeight.SemiBold)
+                    Text("Present", modifier = Modifier.weight(0.8f), color = AppTextMuted, fontWeight = FontWeight.SemiBold)
+                    Text("Absent", modifier = Modifier.weight(0.7f), color = AppTextMuted, fontWeight = FontWeight.SemiBold)
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                summary.forEach { item ->
+                    ElevatedCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        colors = CardDefaults.elevatedCardColors(
+                            containerColor = if (selectedCourseCode == item.courseCode) AppSurfaceSoft else AppSurface,
+                        ),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedCourseCode = item.courseCode }
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(item.courseName, modifier = Modifier.weight(1.8f), color = AppTextDark)
+                            Text(item.total.toString(), modifier = Modifier.weight(0.6f), color = AppTextMuted)
+                            Text(item.present.toString(), modifier = Modifier.weight(0.8f), color = Color(0xFF059669), fontWeight = FontWeight.SemiBold)
+                            Text(item.absent.toString(), modifier = Modifier.weight(0.7f), color = Color(0xFFDC2626), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (selectedCourseCode != null) {
+            Spacer(modifier = Modifier.height(10.dp))
+
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.elevatedCardColors(containerColor = AppSurface),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(selectedCourseName, color = AppTextDark, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Text(selectedCourseCode.orEmpty(), color = AppTextMuted, fontSize = 12.sp)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        LegendDot(Color(0xFF22C55E), "Present")
+                        LegendDot(Color(0xFFEF4444), "Absent")
+                        LegendDot(Color(0xFFF59E0B), "Leave (Applied)")
+                        LegendDot(Color(0xFF4C1D95), "Leave (Approved)")
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text("Date", modifier = Modifier.weight(1f), color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                        Text("Status", modifier = Modifier.weight(1f), color = AppTextDark, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    detailRecords.forEach { record ->
+                        ElevatedCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 6.dp),
+                            colors = CardDefaults.elevatedCardColors(containerColor = AppSurfaceSoft),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(formatDate(record.dateMillis), modifier = Modifier.weight(1f), color = AppTextDark)
+                                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                                    AttendanceStatusBadge(record.status)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun LegendDot(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .background(color, RoundedCornerShape(50))
+                .padding(6.dp),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(label, color = AppTextMuted, fontSize = 11.sp)
+    }
+}
+
+private fun parseDateToMillis(text: String): Long? {
+    return try {
+        val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        formatter.isLenient = false
+        formatter.parse(text)?.time
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun formatDate(millis: Long): String {
+    val formatter = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    return formatter.format(millis)
+}
+
+private fun formatMonth(millis: Long): String {
+    val formatter = SimpleDateFormat("yyyy-MM", Locale.getDefault())
+    return formatter.format(millis)
 }
 
 @Preview(showBackground = true)

@@ -5,7 +5,7 @@ import androidx.room.ForeignKey
 import androidx.room.PrimaryKey
 
 enum class AttendanceStatus {
-    PRESENT, ABSENT, ON_LEAVE
+    PRESENT, ABSENT, LEAVE_APPLIED, LEAVE_APPROVED
 }
 
 @Entity(
