@@ -65,3 +65,5 @@ and
 # ===== Misc =====
 
 .gradle-cache/
+/app/rebuild-debug.ps1
+/.vscode/

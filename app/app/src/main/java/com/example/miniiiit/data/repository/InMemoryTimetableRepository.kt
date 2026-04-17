@@ -36,6 +36,15 @@ data class TimetableValidationResult(
 class InMemoryTimetableRepository(
     private val authDataSource: InMemoryAuthDataSource,
 ) {
+    companion object {
+        val ALLOWED_ROOMS = listOf(
+            "H-101", "H-102", "H-103", "H-104", "H-105",
+            "H-201", "H-202", "H-203", "H-204", "H-205",
+            "H-301", "H-302", "H-303", "H-304",
+            "SH-1", "SH-2", "SH-3", "CR-1",
+        )
+    }
+
     private data class TimetableEntry(
         val id: Int,
         val slotId: Int,
@@ -67,23 +76,50 @@ class InMemoryTimetableRepository(
     private val facultyWeeklyLoadLimit = 16
 
     private val slots = listOf(
-        TimetableSlot(1, "Mon", "09:00", "10:00"),
-        TimetableSlot(2, "Mon", "10:15", "11:15"),
-        TimetableSlot(3, "Mon", "11:30", "12:30"),
-        TimetableSlot(4, "Tue", "09:00", "10:00"),
-        TimetableSlot(5, "Tue", "10:15", "11:15"),
-        TimetableSlot(6, "Tue", "11:30", "12:30"),
-        TimetableSlot(7, "Wed", "09:00", "10:00"),
-        TimetableSlot(8, "Wed", "10:15", "11:15"),
-        TimetableSlot(9, "Wed", "11:30", "12:30"),
-        TimetableSlot(10, "Thu", "09:00", "10:00"),
-        TimetableSlot(11, "Thu", "10:15", "11:15"),
-        TimetableSlot(12, "Thu", "11:30", "12:30"),
-        TimetableSlot(13, "Fri", "09:00", "10:00"),
-        TimetableSlot(14, "Fri", "10:15", "11:15"),
-        TimetableSlot(15, "Fri", "11:30", "12:30"),
-    )
+    // Monday
+    TimetableSlot(1, "Mon", "08:30", "09:55"),
+    TimetableSlot(2, "Mon", "10:05", "11:30"),
+    TimetableSlot(3, "Mon", "11:40", "13:05"),
+    TimetableSlot(4, "Mon", "14:00", "15:25"),
+    TimetableSlot(5, "Mon", "15:35", "17:00"),
+    TimetableSlot(6, "Mon", "17:00", "18:25"),
 
+    // Tuesday
+    TimetableSlot(7, "Tue", "08:30", "09:55"),
+    TimetableSlot(8, "Tue", "10:05", "11:30"),
+    TimetableSlot(9, "Tue", "11:40", "13:05"),
+    TimetableSlot(10, "Tue", "14:00", "15:25"),
+    TimetableSlot(11, "Tue", "15:35", "17:00"),
+    TimetableSlot(12, "Tue", "17:00", "18:25"),
+
+    // Wednesday
+    TimetableSlot(13, "Wed", "08:30", "09:55"),
+    TimetableSlot(14, "Wed", "10:05", "11:30"),
+    TimetableSlot(15, "Wed", "11:40", "13:05"),
+    TimetableSlot(16, "Wed", "17:00", "18:25"),
+
+    // Thursday
+    TimetableSlot(17, "Thu", "08:30", "09:55"),
+    TimetableSlot(18, "Thu", "10:05", "11:30"),
+    TimetableSlot(19, "Thu", "11:40", "13:05"),
+    TimetableSlot(20, "Thu", "14:00", "15:25"),
+    TimetableSlot(21, "Thu", "15:35", "17:00"),
+    TimetableSlot(22, "Thu", "17:00", "18:25"),
+
+    // Friday
+    TimetableSlot(23, "Fri", "08:30", "09:55"),
+    TimetableSlot(24, "Fri", "10:05", "11:30"),
+    TimetableSlot(25, "Fri", "11:40", "13:05"),
+    TimetableSlot(26, "Fri", "14:00", "15:25"),
+    TimetableSlot(27, "Fri", "15:35", "17:00"),
+    TimetableSlot(28, "Fri", "17:00", "18:25"),
+
+    // Saturday
+    TimetableSlot(29, "Sat", "08:30", "09:55"),
+    TimetableSlot(30, "Sat", "10:05", "11:30"),
+    TimetableSlot(31, "Sat", "11:40", "13:05"),
+    TimetableSlot(32, "Sat", "17:00", "18:25"),
+)
     private val entries = mutableListOf<TimetableEntry>()
     private val notes = mutableListOf<TimetableStudentNote>()
     private var nextEntryId = 1
@@ -103,6 +139,8 @@ class InMemoryTimetableRepository(
     fun getCourseAssignments(): List<CourseAssignment> {
         return authDataSource.getAllCourseAssignments().sortedBy { it.code }
     }
+
+    fun getAllowedRooms(): List<String> = ALLOWED_ROOMS
 
     fun getEntriesForBatch(batch: String): List<TimetableEntryView> {
         return entries
@@ -153,6 +191,13 @@ class InMemoryTimetableRepository(
         draft: TimetableDraft,
         ignoreEntryId: Int? = null,
     ): TimetableValidationResult {
+        if (!ALLOWED_ROOMS.contains(draft.room)) {
+            return TimetableValidationResult(
+                isAllowed = false,
+                message = "Invalid room. Select one of the allowed room numbers.",
+            )
+        }
+
         val slotConflict = entries.firstOrNull {
             it.id != ignoreEntryId &&
                 it.batch == draft.batch &&
@@ -322,14 +367,14 @@ class InMemoryTimetableRepository(
         if (entries.isNotEmpty()) return
 
         val defaults = listOf(
-            TimetableDraft(1, "CSE-A", "DASS", "raghureddy", "R-301"),
-            TimetableDraft(2, "CSE-A", "ML", "praveen", "R-305"),
-            TimetableDraft(4, "CSE-A", "NA", "pawan", "R-302"),
-            TimetableDraft(5, "CSE-A", "IHS", "aniket", "R-201"),
-            TimetableDraft(7, "CSE-B", "DASS", "raghureddy", "R-301"),
-            TimetableDraft(8, "CSE-B", "ML", "praveen", "R-305"),
-            TimetableDraft(10, "CSE-B", "NA", "pawan", "R-302"),
-            TimetableDraft(11, "CSE-B", "IHS", "aniket", "R-201"),
+            TimetableDraft(1, "CSE-A", "DASS", "raghureddy", "H-301"),
+            TimetableDraft(2, "CSE-A", "ML", "praveen", "H-303"),
+            TimetableDraft(4, "CSE-A", "NA", "pawan", "H-302"),
+            TimetableDraft(5, "CSE-A", "IHS", "aniket", "H-201"),
+            TimetableDraft(7, "CSE-B", "DASS", "raghureddy", "H-301"),
+            TimetableDraft(8, "CSE-B", "ML", "praveen", "H-303"),
+            TimetableDraft(10, "CSE-B", "NA", "pawan", "H-302"),
+            TimetableDraft(11, "CSE-B", "IHS", "aniket", "H-201"),
         )
 
         defaults.forEach { draft ->

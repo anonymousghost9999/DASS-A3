@@ -1,6 +1,7 @@
 package com.example.miniiiit
 
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -38,12 +39,19 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -55,6 +63,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,11 +90,18 @@ private val AppBg = Color(0xFFF8FAFC)
 private val AppSurface = Color(0xFFFFFFFF)
 private val AppSurfaceSoft = Color(0xFFEFF6FF)
 private val AppPrimary = Color(0xFF2563EB)
+private val AppPrimaryBright = Color(0xFF1D6BFF)
 private val AppPrimaryDark = Color(0xFF1D4ED8)
 private val AppTextDark = Color(0xFF0F172A)
 private val AppTextMuted = Color(0xFF64748B)
 private val AppBorder = Color(0xFFDBEAFE)
 private val AppError = Color(0xFFDC2626)
+private val AllowedRoomNumbers = listOf(
+    "H-101", "H-102", "H-103", "H-104", "H-105",
+    "H-201", "H-202", "H-203", "H-204", "H-205",
+    "H-301", "H-302", "H-303", "H-304",
+    "SH-1", "SH-2", "SH-3", "CR-1",
+)
 
 enum class AppScreen {
     Login,
@@ -137,36 +153,61 @@ fun MiniImsApp(modifier: Modifier = Modifier) {
     val authDataSource = remember { InMemoryAuthDataSource() }
     val attendanceRepository = remember { InMemoryAttendanceRepository(authDataSource) }
     val timetableRepository = remember { InMemoryTimetableRepository(authDataSource) }
-    var currentUser by remember { mutableStateOf<User?>(null) }
-    var currentScreen by remember { mutableStateOf(AppScreen.Login) }
-    var selectedFeature by remember { mutableStateOf("") }
+    var currentUsername by rememberSaveable { mutableStateOf<String?>(null) }
+    val currentUser = remember(currentUsername) {
+        currentUsername?.let { authDataSource.getUserByUsername(it) }
+    }
+    var currentScreenName by rememberSaveable { mutableStateOf(AppScreen.Login.name) }
+    var currentScreen by rememberSaveable { mutableStateOf(AppScreen.Login) }
+    var selectedFeature by rememberSaveable { mutableStateOf("") }
+    var selectedDashboardTabName by rememberSaveable { mutableStateOf(DashboardTab.Dashboard.name) }
+    var selectedDashboardTab by rememberSaveable { mutableStateOf(DashboardTab.Dashboard) }
+
+    if (currentScreen.name != currentScreenName) {
+        currentScreen = AppScreen.valueOf(currentScreenName)
+    }
+    if (selectedDashboardTab.name != selectedDashboardTabName) {
+        selectedDashboardTab = DashboardTab.valueOf(selectedDashboardTabName)
+    }
 
     when (currentScreen) {
         AppScreen.Login -> LoginScreen(
             modifier = modifier,
             authDataSource = authDataSource,
             onLoginSuccess = {
-                currentUser = it
+                currentUsername = it.username
                 currentScreen = AppScreen.Dashboard
+                currentScreenName = AppScreen.Dashboard.name
             },
         )
         AppScreen.Dashboard -> currentUser?.let { user ->
             ModuleDashboardScreen(
                 modifier = modifier,
                 user = user,
+                selectedTab = selectedDashboardTab,
+                onTabSelected = {
+                    selectedDashboardTab = it
+                    selectedDashboardTabName = it.name
+                },
                 onOpenFeature = {
                     if (it == "Attendance") {
                         currentScreen = AppScreen.Attendance
+                        currentScreenName = AppScreen.Attendance.name
                     } else if (it == "Time Table") {
                         currentScreen = AppScreen.TimeTable
+                        currentScreenName = AppScreen.TimeTable.name
                     } else {
                         selectedFeature = it
                         currentScreen = AppScreen.DashboardStub
+                        currentScreenName = AppScreen.DashboardStub.name
                     }
                 },
                 onLogout = {
-                    currentUser = null
+                    currentUsername = null
                     currentScreen = AppScreen.Login
+                    currentScreenName = AppScreen.Login.name
+                    selectedDashboardTab = DashboardTab.Dashboard
+                    selectedDashboardTabName = DashboardTab.Dashboard.name
                 },
             )
         }
@@ -175,10 +216,16 @@ fun MiniImsApp(modifier: Modifier = Modifier) {
                 modifier = modifier,
                 user = user,
                 attendanceRepository = attendanceRepository,
-                onBack = { currentScreen = AppScreen.Dashboard },
+                onBack = {
+                    currentScreen = AppScreen.Dashboard
+                    currentScreenName = AppScreen.Dashboard.name
+                },
                 onLogout = {
-                    currentUser = null
+                    currentUsername = null
                     currentScreen = AppScreen.Login
+                    currentScreenName = AppScreen.Login.name
+                    selectedDashboardTab = DashboardTab.Dashboard
+                    selectedDashboardTabName = DashboardTab.Dashboard.name
                 },
             )
         }
@@ -187,10 +234,16 @@ fun MiniImsApp(modifier: Modifier = Modifier) {
                 modifier = modifier,
                 user = user,
                 timetableRepository = timetableRepository,
-                onBack = { currentScreen = AppScreen.Dashboard },
+                onBack = {
+                    currentScreen = AppScreen.Dashboard
+                    currentScreenName = AppScreen.Dashboard.name
+                },
                 onLogout = {
-                    currentUser = null
+                    currentUsername = null
                     currentScreen = AppScreen.Login
+                    currentScreenName = AppScreen.Login.name
+                    selectedDashboardTab = DashboardTab.Dashboard
+                    selectedDashboardTabName = DashboardTab.Dashboard.name
                 },
             )
         }
@@ -200,11 +253,23 @@ fun MiniImsApp(modifier: Modifier = Modifier) {
                 user = user,
                 title = selectedFeature,
                 subtitle = "Dashboard feature stub",
-                icon = { Icon(Icons.Default.Settings, contentDescription = null, tint = AppPrimary) },
-                onBack = { currentScreen = AppScreen.Dashboard },
+                icon = {
+                    if (selectedFeature == "Finance") {
+                        Text("₹", color = AppPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                    } else {
+                        Icon(Icons.Default.Settings, contentDescription = null, tint = AppPrimary)
+                    }
+                },
+                onBack = {
+                    currentScreen = AppScreen.Dashboard
+                    currentScreenName = AppScreen.Dashboard.name
+                },
                 onLogout = {
-                    currentUser = null
+                    currentUsername = null
                     currentScreen = AppScreen.Login
+                    currentScreenName = AppScreen.Login.name
+                    selectedDashboardTab = DashboardTab.Dashboard
+                    selectedDashboardTabName = DashboardTab.Dashboard.name
                 },
             )
         }
@@ -254,8 +319,14 @@ fun LoginScreen(
                     value = username,
                     onValueChange = { username = it.trim() },
                     label = { Text("Username") },
+                    placeholder = { Text("Enter username", color = AppTextMuted) },
                     leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = AppTextMuted) },
                     modifier = Modifier.fillMaxWidth(),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = AppTextDark),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = AppTextDark,
+                        unfocusedTextColor = AppTextDark,
+                    ),
                     singleLine = true,
                 )
 
@@ -265,8 +336,14 @@ fun LoginScreen(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text("Password") },
+                    placeholder = { Text("Enter password", color = AppTextMuted) },
                     leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null, tint = AppTextMuted) },
                     modifier = Modifier.fillMaxWidth(),
+                    textStyle = androidx.compose.ui.text.TextStyle(color = AppTextDark),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = AppTextDark,
+                        unfocusedTextColor = AppTextDark,
+                    ),
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                 )
@@ -284,6 +361,7 @@ fun LoginScreen(
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AppPrimaryBright),
                 ) {
                     Text("Login", color = Color.White)
                 }
@@ -303,11 +381,16 @@ fun LoginScreen(
 fun ModuleDashboardScreen(
     modifier: Modifier = Modifier,
     user: User,
+    selectedTab: DashboardTab,
+    onTabSelected: (DashboardTab) -> Unit,
     onOpenFeature: (String) -> Unit,
     onLogout: () -> Unit
 ) {
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableStateOf(DashboardTab.Dashboard) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+
+    BackHandler(enabled = selectedTab != DashboardTab.Dashboard) {
+        onTabSelected(DashboardTab.Dashboard)
+    }
 
     val dashboardFeatures = listOf(
         DashboardFeatureItem("Latest News", "Show updates immediately after login", Icons.Default.Article),
@@ -352,19 +435,19 @@ fun ModuleDashboardScreen(
             NavigationBar(containerColor = AppSurface) {
                 NavigationBarItem(
                     selected = selectedTab == DashboardTab.Dashboard,
-                    onClick = { selectedTab = DashboardTab.Dashboard },
+                    onClick = { onTabSelected(DashboardTab.Dashboard) },
                     icon = { Icon(Icons.Default.Home, contentDescription = null) },
                     label = { Text("Dashboard") },
                 )
                 NavigationBarItem(
                     selected = selectedTab == DashboardTab.Modules,
-                    onClick = { selectedTab = DashboardTab.Modules },
+                    onClick = { onTabSelected(DashboardTab.Modules) },
                     icon = { Icon(Icons.Default.MenuBook, contentDescription = null) },
                     label = { Text("Modules") },
                 )
                 NavigationBarItem(
                     selected = selectedTab == DashboardTab.Settings,
-                    onClick = { selectedTab = DashboardTab.Settings },
+                    onClick = { onTabSelected(DashboardTab.Settings) },
                     icon = { Icon(Icons.Default.Settings, contentDescription = null) },
                     label = { Text("Settings") },
                 )
@@ -409,8 +492,16 @@ fun ModuleDashboardScreen(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 label = { Text("Search current tab") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AppTextMuted) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AppPrimaryBright) },
                 modifier = Modifier.fillMaxWidth(),
+                textStyle = androidx.compose.ui.text.TextStyle(color = AppTextDark),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = AppTextDark,
+                    unfocusedTextColor = AppTextDark,
+                    focusedBorderColor = AppPrimaryBright,
+                    focusedLabelColor = AppPrimaryBright,
+                    cursorColor = AppPrimaryBright,
+                ),
                 singleLine = true,
             )
 
@@ -486,7 +577,11 @@ fun ModuleCard(
                     .padding(12.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Icon(icon, contentDescription = null, tint = AppPrimary)
+                if (title == "Finance") {
+                    Text("₹", color = AppPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                } else {
+                    Icon(icon, contentDescription = null, tint = AppPrimary)
+                }
             }
 
             Spacer(modifier = Modifier.width(14.dp))
@@ -514,6 +609,8 @@ fun ModulePageScreen(
     onBack: () -> Unit,
     onLogout: () -> Unit,
 ) {
+    BackHandler(onBack = onBack)
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -563,7 +660,7 @@ fun ModulePageScreen(
                     SettingsFormStub()
                 } else {
                     Text(
-                        "Not in assignment scope.",
+                        "Coming soon...",
                         color = AppTextDark,
                     )
                 }
@@ -573,46 +670,94 @@ fun ModulePageScreen(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun SettingsFormStub() {
     var language by remember { mutableStateOf("English") }
     var timeZone by remember { mutableStateOf("Asia/Kolkata") }
     var currency by remember { mutableStateOf("INR") }
+    var appearance by remember { mutableStateOf("Light Mode") }
 
     Text("Basic Settings", fontWeight = FontWeight.SemiBold, color = AppTextDark)
     Spacer(modifier = Modifier.height(10.dp))
 
-    OutlinedTextField(
+    SingleOptionDropdown(
+        label = "Language",
         value = language,
-        onValueChange = { language = it },
-        label = { Text("Language") },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
+        onSelected = { language = it },
     )
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    OutlinedTextField(
+    SingleOptionDropdown(
+        label = "Time Zone",
         value = timeZone,
-        onValueChange = { timeZone = it },
-        label = { Text("Time Zone") },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
+        onSelected = { timeZone = it },
     )
 
     Spacer(modifier = Modifier.height(10.dp))
 
-    OutlinedTextField(
+    SingleOptionDropdown(
+        label = "Currency",
         value = currency,
-        onValueChange = { currency = it },
-        label = { Text("Currency") },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true,
+        onSelected = { currency = it },
+    )
+
+    Spacer(modifier = Modifier.height(10.dp))
+
+    SingleOptionDropdown(
+        label = "Appearance",
+        value = appearance,
+        options = listOf("Light Mode"),
+        onSelected = { appearance = it },
     )
 
     Spacer(modifier = Modifier.height(12.dp))
 
     Button(onClick = { }, modifier = Modifier.fillMaxWidth()) {
         Text("Save")
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SingleOptionDropdown(
+    label: String,
+    value: String,
+    options: List<String> = listOf(value),
+    onSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { },
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+            singleLine = true,
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelected(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -624,6 +769,8 @@ fun AttendanceModuleScreen(
     onBack: () -> Unit,
     onLogout: () -> Unit,
 ) {
+    BackHandler(onBack = onBack)
+
     val isStudent = user.role == UserRole.STUDENT
     var selectedTab by remember { mutableStateOf(if (isStudent) AttendanceTab.Reports else AttendanceTab.Mark) }
 
@@ -1477,6 +1624,8 @@ fun TimeTableModuleScreen(
     onBack: () -> Unit,
     onLogout: () -> Unit,
 ) {
+    BackHandler(onBack = onBack)
+
     val isStudent = user.role == UserRole.STUDENT
     val canManage = timetableRepository.canManageOfficialTimetable(user)
 
@@ -1495,7 +1644,7 @@ fun TimeTableModuleScreen(
         mutableStateOf(if (isStudent) fixedStudentBatch else batches.firstOrNull().orEmpty())
     }
     var selectedCourseCode by remember { mutableStateOf(assignableCourses.firstOrNull()?.code.orEmpty()) }
-    var room by remember { mutableStateOf("R-101") }
+    var room by remember { mutableStateOf(AllowedRoomNumbers.first()) }
     var selectedMoveEntryId by remember { mutableStateOf<Int?>(null) }
     var statusMessage by remember { mutableStateOf("Drag-and-drop flow: pick class, then drop on a slot.") }
     var noteSlotId by remember { mutableStateOf(slots.firstOrNull()?.id ?: 1) }
@@ -1508,6 +1657,10 @@ fun TimeTableModuleScreen(
 
     if (selectedCourseCode.isNotBlank() && assignableCourses.none { it.code == selectedCourseCode }) {
         selectedCourseCode = assignableCourses.firstOrNull()?.code.orEmpty()
+    }
+
+    if (room !in AllowedRoomNumbers) {
+        room = AllowedRoomNumbers.first()
     }
 
     val effectiveBatch = if (isStudent) fixedStudentBatch else selectedBatch
@@ -1630,12 +1783,11 @@ fun TimeTableModuleScreen(
                         }
 
                         Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
+                        SingleOptionDropdown(
+                            label = "Room",
                             value = room,
-                            onValueChange = { room = it },
-                            label = { Text("Room") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true,
+                            options = AllowedRoomNumbers,
+                            onSelected = { room = it },
                         )
                     }
 
