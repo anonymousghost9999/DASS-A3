@@ -325,7 +325,6 @@ fun ModuleDashboardScreen(
         DashboardFeatureItem("News Management", "Stub module", Icons.Default.Article),
         DashboardFeatureItem("Student Details", "Stub module", Icons.Default.Person),
         DashboardFeatureItem("Finance", "Stub module", Icons.Default.Settings),
-        DashboardFeatureItem("Multiple Dashboards", "Stub module", Icons.Default.Home),
     )
 
     val settingFeatures = listOf(
@@ -564,7 +563,7 @@ fun ModulePageScreen(
                     SettingsFormStub()
                 } else {
                     Text(
-                        "This is a dashboard stub page for $title. End-to-end logic intentionally not implemented.",
+                        "Not in assignment scope.",
                         color = AppTextDark,
                     )
                 }

@@ -79,10 +79,11 @@ class InMemoryAttendanceRepository(
 
     fun getCoursesForContext(batch: String, username: String, role: UserRole): List<AttendanceCourse> {
         val mapped = when (role) {
-            UserRole.FACULTY, UserRole.ADMIN -> {
+            UserRole.ADMIN -> {
                 val studentUser = getStudentsForBatch(batch).firstOrNull()?.username
                 if (studentUser == null) emptyList() else authDataSource.getCoursesForStudent(studentUser)
             }
+            UserRole.FACULTY -> authDataSource.getCoursesForFaculty(username)
             UserRole.STUDENT -> authDataSource.getCoursesForStudent(username)
             else -> emptyList()
         }
@@ -170,7 +171,7 @@ class InMemoryAttendanceRepository(
 
     fun getAvailableCourseCodes(viewer: User): List<String> {
         val codes = when (viewer.role) {
-            UserRole.ADMIN, UserRole.FACULTY -> {
+            UserRole.ADMIN -> {
                 val users = authDataSource.getAllUsers()
                 val studentCodes = users
                     .filter { it.role == UserRole.STUDENT }
@@ -178,6 +179,7 @@ class InMemoryAttendanceRepository(
                     .map { it.code }
                 studentCodes
             }
+            UserRole.FACULTY -> authDataSource.getCoursesForFaculty(viewer.username).map { it.code }
             UserRole.STUDENT -> authDataSource.getCoursesForStudent(viewer.username).map { it.code }
             else -> emptyList()
         }
@@ -210,8 +212,15 @@ class InMemoryAttendanceRepository(
 
     private fun isVisibleTo(record: AttendanceRecord, viewer: User): Boolean {
         return when (viewer.role) {
-            UserRole.ADMIN, UserRole.FACULTY -> true
+            UserRole.ADMIN -> true
             UserRole.STUDENT -> record.username == viewer.username
+            UserRole.FACULTY -> {
+                val facultyCourseCodes = authDataSource
+                    .getCoursesForFaculty(viewer.username)
+                    .map { it.code }
+                    .toSet()
+                record.courseCode in facultyCourseCodes
+            }
             else -> false
         }
     }
