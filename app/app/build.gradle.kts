@@ -4,7 +4,6 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-layout.buildDirectory.set(file("C:/Users/chitl/AppData/Local/Temp/dass-a3-app-build"))
 
 android {
     namespace = "com.example.miniiiit"

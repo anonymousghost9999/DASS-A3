@@ -1,0 +1,67 @@
+# ===== Android / Gradle =====
+
+.gradle/
+build/
+*/build/
+
+# Local Gradle cache (your repo already has this inside app/)
+
+**/.gradle/
+
+# ===== Android Studio / IntelliJ =====
+
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# BUT keep shared code style (optional)
+
+!.idea/codeStyles/
+!.idea/inspectionProfiles/
+
+# ===== Local configuration (machine-specific) =====
+
+local.properties
+
+# ===== OS-specific junk =====
+
+.DS_Store
+Thumbs.db
+
+# ===== Logs =====
+
+*.log
+
+# ===== Generated files =====
+
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ===== Keystore / signing =====
+
+*.jks
+*.keystore
+
+# ===== Kotlin / Java build =====
+
+*.class
+out/
+
+# ===== Android Studio Navigation Editor =====
+and
+.navigation/
+
+# ===== Android profiling =====
+
+*.hprof
+
+# ===== Temporary files =====
+
+*.tmp
+*.bak
+
+# ===== Misc =====
+
+.gradle-cache/
